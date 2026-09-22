@@ -1,0 +1,68 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ContentType {
+  MOVIE
+  SERIES
+}
+
+model Content {
+  id          String      @id @default(cuid())
+  type        ContentType
+  title       String
+  slug        String      @unique
+  description String      @db.Text
+  genres      String[]
+  language    String
+  releaseYear Int
+  poster      String      // Telegram File ID for poster photo
+  banner      String      // Telegram File ID for banner photo
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  movie       Movie?
+  seasons     Season[]
+
+  @@index([slug])
+  @@index([type])
+}
+
+model Movie {
+  id             String   @id @default(cuid())
+  contentId      String   @unique
+  content        Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  telegramFileId String   // Telegram File ID for video
+  duration       Int?     // Duration in seconds
+  createdAt      DateTime @default(now())
+}
+
+model Season {
+  id           String    @id @default(cuid())
+  contentId    String
+  content      Content   @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  seasonNumber Int
+  episodes     Episode[]
+  createdAt    DateTime  @default(now())
+
+  @@unique([contentId, seasonNumber])
+}
+
+model Episode {
+  id             String   @id @default(cuid())
+  seasonId       String
+  season         Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  episodeNumber  Int
+  title          String
+  telegramFileId String   // Telegram File ID for episode video
+  thumbnail      String   // Telegram File ID for episode thumbnail
+  duration       Int?     // Duration in seconds
+  createdAt      DateTime @default(now())
+
+  @@unique([seasonId, episodeNumber])
+}

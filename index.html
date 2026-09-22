@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MovieVault - Netflix-Style Streaming Powered by Telegram</title>
+    <meta name="description" content="Private Netflix-like streaming platform backed by Telegram media storage with admin series/movie uploader and video player." />
+    <meta property="og:title" content="MovieVault - Netflix-Style Streaming Powered by Telegram" />
+    <meta property="og:description" content="Private Netflix-like streaming platform backed by Telegram media storage with admin series/movie uploader and video player." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Gracefully prevent benign preview WebSocket disconnection from bubbling as unhandled rejection
+      window.addEventListener('unhandledrejection', function (e) {
+        if (
+          e.reason &&
+          (e.reason.message === 'WebSocket closed without opened.' ||
+            (typeof e.reason === 'string' && e.reason.includes('WebSocket')) ||
+            (e.reason.stack && e.reason.stack.includes('@vite/client')))
+        ) {
+          e.preventDefault();
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

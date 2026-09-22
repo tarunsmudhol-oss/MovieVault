@@ -1,0 +1,6 @@
+{
+  "name": "MovieVault",
+  "description": "Private Netflix-like streaming platform backed by Telegram media storage with admin series/movie uploader and video player.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

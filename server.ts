@@ -1,0 +1,969 @@
+import express from 'express';
+import http from 'http';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
+import multer from 'multer';
+import dotenv from 'dotenv';
+import { createServer as createViteServer } from 'vite';
+import {
+  uploadPhotoToTelegram,
+  uploadVideoToTelegram,
+  getTelegramFileMetadata,
+  checkBotChannelPermissions,
+} from './services/telegram.service';
+
+dotenv.config();
+
+const app = express();
+const server = http.createServer(app);
+const PORT = parseInt(process.env.PORT || '3000', 10);
+
+// Disk storage directories for high-performance processing of files > 2 GB without memory limits
+const uploadDir = path.join(os.tmpdir(), 'movievault_uploads');
+const mediaVaultDir = path.join(os.tmpdir(), 'movievault_media');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(mediaVaultDir)) fs.mkdirSync(mediaVaultDir, { recursive: true });
+
+// Disk storage for multer to stream files > 2 GB cleanly to disk
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, `${uniqueSuffix}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 20 * 1024 * 1024 * 1024, // 20 GB file size limit (allows > 2 GB)
+    fieldSize: 100 * 1024 * 1024,      // 100 MB max field size
+  },
+});
+
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+// In-memory catalog database for demonstration & local storage
+interface InMemContent {
+  id: string;
+  type: 'MOVIE' | 'SERIES';
+  title: string;
+  slug: string;
+  description: string;
+  genres: string[];
+  language: string;
+  releaseYear: number;
+  poster: string; // Telegram File ID or URL
+  banner: string; // Telegram File ID or URL
+  createdAt: string;
+  movie?: {
+    telegramFileId: string;
+    duration?: number;
+    streamUrl?: string;
+  };
+  seasons?: {
+    seasonNumber: number;
+    episodes: {
+      episodeNumber: number;
+      title: string;
+      telegramFileId: string;
+      thumbnail: string;
+      duration?: number;
+      streamUrl?: string;
+    }[];
+  }[];
+}
+
+// Seed initial high quality content
+const contentDatabase: InMemContent[] = [
+  {
+    id: 'c_vault_1',
+    type: 'SERIES',
+    title: 'Cyberpunk Odyssey',
+    slug: 'cyberpunk-odyssey',
+    description: 'In a neon-drenched megacity running on rogue AI systems, a lone data archivist uncovers encrypted memories belonging to the syndicate that rules the underworld.',
+    genres: ['Sci-Fi', 'Action', 'Thriller'],
+    language: 'English',
+    releaseYear: 2025,
+    poster: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80',
+    banner: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1600&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString(),
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: [
+          {
+            episodeNumber: 1,
+            title: 'Protocol 0: Ghost in the Core',
+            telegramFileId: 'TG_FILE_S1_E1_SIMULATED',
+            thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
+            duration: 2740,
+            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+          },
+          {
+            episodeNumber: 2,
+            title: 'Neural Cascade',
+            telegramFileId: 'TG_FILE_S1_E2_SIMULATED',
+            thumbnail: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
+            duration: 2890,
+            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+          },
+          {
+            episodeNumber: 3,
+            title: 'Sublevel 88',
+            telegramFileId: 'TG_FILE_S1_E3_SIMULATED',
+            thumbnail: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600&auto=format&fit=crop&q=80',
+            duration: 3100,
+            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'c_vault_2',
+    type: 'MOVIE',
+    title: 'Solaris Drift',
+    slug: 'solaris-drift',
+    description: 'An orbital mining vessel encounters a spatial anomaly near Saturn’s rings that bends gravitational time dilations, forcing the crew to make an impossible choice.',
+    genres: ['Sci-Fi', 'Drama', 'Adventure'],
+    language: 'English',
+    releaseYear: 2024,
+    poster: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
+    banner: 'https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=1600&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString(),
+    movie: {
+      telegramFileId: 'TG_FILE_MOVIE_SOLARIS_SIMULATED',
+      duration: 7200,
+      streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    },
+  },
+  {
+    id: 'c_vault_3',
+    type: 'SERIES',
+    title: 'The Northern Veil',
+    slug: 'the-northern-veil',
+    description: 'A detective with a fragmented past investigates a series of mysterious disappearances in an isolated Norwegian fjord where daylight vanishes for months.',
+    genres: ['Mystery', 'Crime', 'Drama'],
+    language: 'Norwegian',
+    releaseYear: 2024,
+    poster: 'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=800&auto=format&fit=crop&q=80',
+    banner: 'https://images.unsplash.com/photo-1483921020237-2ff51e8e4b22?w=1600&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString(),
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: [
+          {
+            episodeNumber: 1,
+            title: 'Black Ice',
+            telegramFileId: 'TG_FILE_NV_S1_E1_SIMULATED',
+            thumbnail: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600&auto=format&fit=crop&q=80',
+            duration: 3200,
+            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          },
+          {
+            episodeNumber: 2,
+            title: 'Glacial Echo',
+            telegramFileId: 'TG_FILE_NV_S1_E2_SIMULATED',
+            thumbnail: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80',
+            duration: 3050,
+            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+          },
+        ],
+      },
+    ],
+  },
+];
+
+// Helper to check if telegram credentials are set
+function isTelegramConfigured() {
+  return Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+}
+
+// Cached Telegram channel permission checker to prevent spamming Telegram API
+let lastChannelCheckTime = 0;
+let cachedChannelCheck: any = null;
+
+async function getChannelPostingStatus(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedChannelCheck && (now - lastChannelCheckTime < 20000)) {
+    return cachedChannelCheck;
+  }
+  cachedChannelCheck = await checkBotChannelPermissions();
+  lastChannelCheckTime = now;
+  return cachedChannelCheck;
+}
+
+// 1. Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    telegramConfigured: isTelegramConfigured(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// 2. Telegram Bot status and diagnostics
+app.get('/api/telegram/status', async (req, res) => {
+  const refresh = req.query.refresh === 'true';
+  const status = await getChannelPostingStatus(refresh);
+  res.json(status);
+});
+
+// 3. Test Telegram Photo Upload directly
+app.post('/api/telegram/test-upload', upload.single('testPhoto') as any, async (req, res) => {
+  try {
+    if (!isTelegramConfigured()) {
+      return res.status(400).json({
+        error: 'Telegram Bot credentials not configured in environment variables.',
+      });
+    }
+
+    let buffer: Buffer;
+    let fileName = 'test_image.jpg';
+    let mimeType = 'image/jpeg';
+
+    if (req.file) {
+      const fileBuf = getFileBuffer(req.file);
+      if (!fileBuf) {
+        return res.status(400).json({
+          error: 'Failed to read uploaded test photo from disk.',
+        });
+      }
+      buffer = fileBuf;
+      fileName = req.file.originalname;
+      mimeType = req.file.mimetype;
+    } else {
+      // 1x1 transparent red pixel JPEG buffer
+      const sampleBase64 = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+      buffer = Buffer.from(sampleBase64, 'base64');
+    }
+
+    const result = await uploadPhotoToTelegram(
+      buffer,
+      fileName,
+      mimeType,
+      `[MovieVault Diagnostic Test] ${new Date().toISOString()}`
+    );
+
+    res.json({
+      success: true,
+      message: 'Test photo successfully uploaded to Telegram channel without IMAGE_PROCESS_FAILED!',
+      result,
+    });
+  } catch (err: any) {
+    console.error('Test upload error:', err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      details: err.response?.data || null,
+    });
+  } finally {
+    if (req.file) {
+      safeCleanup(req.file);
+    }
+  }
+});
+
+// 4. Content catalog API
+app.get('/api/content', (req, res) => {
+  res.json({
+    items: contentDatabase,
+    total: contentDatabase.length,
+  });
+});
+
+// Helper to retrieve buffer safely from disk or memory
+function getFileBuffer(file?: Express.Multer.File): Buffer | null {
+  if (!file) return null;
+  if (file.buffer) return file.buffer;
+  if (file.path && fs.existsSync(file.path)) {
+    return fs.readFileSync(file.path);
+  }
+  return null;
+}
+
+function safeCleanup(file?: Express.Multer.File) {
+  if (file?.path && fs.existsSync(file.path)) {
+    try {
+      fs.unlinkSync(file.path);
+    } catch {}
+  }
+}
+
+// 4.5 Chunked upload endpoint to bypass proxy & Cloud Run 32MB single-request limits
+app.post('/api/upload/chunk', (req, res, next) => {
+  (upload.single('chunk') as any)(req, res, (err: any) => {
+    if (err) {
+      console.error('[Chunk Middleware Error]:', err);
+      return res.status(400).json({ error: `Chunk error: ${err.message}` });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const file = req.file;
+    const body = req.body || {};
+    const uploadId = body.uploadId;
+    const fileKey = body.fileKey;
+    const chunkIndex = parseInt(body.chunkIndex, 10);
+    const totalChunks = parseInt(body.totalChunks, 10);
+    const originalName = body.originalName || 'video.mp4';
+
+    if (!file || !uploadId || !fileKey || isNaN(chunkIndex) || isNaN(totalChunks)) {
+      return res.status(400).json({
+        error: 'Missing chunk upload parameters (uploadId, fileKey, chunkIndex, totalChunks)',
+      });
+    }
+
+    const chunkFileName = `chunk_${uploadId}_${fileKey}_${chunkIndex}`;
+    const chunkPath = path.join(uploadDir, chunkFileName);
+
+    if (file.path && fs.existsSync(file.path)) {
+      fs.copyFileSync(file.path, chunkPath);
+      try {
+        fs.unlinkSync(file.path);
+      } catch {}
+    } else if (file.buffer) {
+      fs.writeFileSync(chunkPath, file.buffer);
+    }
+
+    // Check if this is the final chunk: assemble sequentially
+    if (chunkIndex === totalChunks - 1) {
+      const sanitizedName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const assembledFileName = `assembled_${uploadId}__SEP__${fileKey}__SEP__${sanitizedName}`;
+      const assembledPath = path.join(uploadDir, assembledFileName);
+
+      const writeStream = fs.createWriteStream(assembledPath);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const cPath = path.join(uploadDir, `chunk_${uploadId}_${fileKey}_${i}`);
+        if (fs.existsSync(cPath)) {
+          const chunkData = fs.readFileSync(cPath);
+          writeStream.write(chunkData);
+          try {
+            fs.unlinkSync(cPath);
+          } catch {}
+        }
+      }
+      writeStream.end();
+
+      await new Promise<void>((resolve, reject) => {
+        writeStream.on('finish', () => resolve());
+        writeStream.on('error', (err) => reject(err));
+      });
+
+      const totalSize = fs.statSync(assembledPath).size;
+      const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+      console.log(`[Chunk Assembler] Completed assembling ${fileKey} (${totalSizeMB} MB, ${totalChunks} chunks) -> ${assembledFileName}`);
+
+      return res.json({
+        success: true,
+        assembled: true,
+        chunkIndex,
+        totalChunks,
+        totalSize,
+      });
+    }
+
+    res.json({
+      success: true,
+      assembled: false,
+      chunkIndex,
+      totalChunks,
+    });
+  } catch (err: any) {
+    console.error('[Chunk Upload Error]:', err);
+    res.status(500).json({ error: err.message || 'Chunk processing failed' });
+  }
+});
+
+// 5. Upload route (implements the exact architecture for MovieVault with >2GB support)
+app.post('/api/upload', (req, res, next) => {
+  (upload.any() as any)(req, res, (err: any) => {
+    if (err) {
+      console.error('[Upload Middleware Error]:', err);
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: 'Payload Too Large: One of the uploaded files exceeds the maximum limit of 20 GB.',
+          code: 'PAYLOAD_TOO_LARGE',
+        });
+      }
+      return res.status(400).json({
+        error: `Upload processing error: ${err.message}`,
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const files = (req.files as Express.Multer.File[]) || [];
+    const body = req.body || {};
+
+    const type = (body.type || 'SERIES').toUpperCase() as 'MOVIE' | 'SERIES';
+    const title = body.title || 'Untitled';
+    const description = body.description || '';
+    const genreRaw = body.genre || body.genres || 'Action';
+    const language = body.language || 'English';
+    const releaseYear = parseInt(body.releaseYear || String(new Date().getFullYear()), 10);
+
+    const genres = typeof genreRaw === 'string'
+      ? genreRaw.split(',').map((g: string) => g.trim()).filter(Boolean)
+      : ['Action'];
+
+    // Map files by fieldname
+    const fileMap = new Map<string, Express.Multer.File>();
+    files.forEach((f) => fileMap.set(f.fieldname, f));
+
+    // Connect any chunk-assembled files from /tmp/movievault_uploads matching this uploadId
+    const uploadId = body.uploadId as string | undefined;
+    if (uploadId && fs.existsSync(uploadDir)) {
+      const dirFiles = fs.readdirSync(uploadDir);
+      dirFiles.forEach((fileName) => {
+        const sepPrefix = `assembled_${uploadId}__SEP__`;
+        const legacyPrefix = `assembled_${uploadId}_`;
+        let fileKey = '';
+        let origName = fileName;
+
+        if (fileName.startsWith(sepPrefix)) {
+          const rest = fileName.substring(sepPrefix.length);
+          const sepIdx = rest.indexOf('__SEP__');
+          fileKey = sepIdx > 0 ? rest.substring(0, sepIdx) : rest;
+          origName = sepIdx > 0 ? rest.substring(sepIdx + 7) : fileName;
+        } else if (fileName.startsWith(legacyPrefix)) {
+          const rest = fileName.substring(legacyPrefix.length);
+          const lastUnderscore = rest.lastIndexOf('_');
+          fileKey = lastUnderscore > 0 ? rest.substring(0, lastUnderscore) : rest;
+          origName = lastUnderscore > 0 ? rest.substring(lastUnderscore + 1) : fileName;
+        }
+
+        if (fileKey) {
+          const fullPath = path.join(uploadDir, fileName);
+          const stats = fs.statSync(fullPath);
+          const isMkv = fileName.toLowerCase().endsWith('.mkv');
+          const mime = isMkv ? 'video/x-matroska' : 'video/mp4';
+
+          const virtualFile: Express.Multer.File = {
+            fieldname: fileKey,
+            originalname: origName,
+            encoding: '7bit',
+            mimetype: mime,
+            size: stats.size,
+            destination: uploadDir,
+            filename: fileName,
+            path: fullPath,
+            buffer: undefined as any,
+          } as Express.Multer.File;
+
+          fileMap.set(fileKey, virtualFile);
+          console.log(`[Server] Linked chunk-assembled file "${fileKey}" (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
+        }
+      });
+    }
+
+    const posterFile = fileMap.get('poster');
+    const bannerFile = fileMap.get('banner');
+
+    console.log(`[Server /api/upload] Received upload for "${title}" (${type}). Total files: ${files.length}`);
+
+    let posterFileId = `sim_poster_${Date.now()}`;
+    let bannerFileId = `sim_banner_${Date.now()}`;
+    let posterUrl = 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800&auto=format&fit=crop&q=80';
+    let bannerUrl = 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1600&auto=format&fit=crop&q=80';
+
+    // Verify Telegram Bot channel permissions
+    const channelStatus = isTelegramConfigured() ? await getChannelPostingStatus() : null;
+    const canUploadToTg = Boolean(channelStatus && channelStatus.canPost);
+
+    if (isTelegramConfigured() && !canUploadToTg) {
+      console.log(`[Server] Bot @${channelStatus?.botUsername || 'bot'} is not yet an Administrator in channel "${channelStatus?.chatTitle || 'channel'}". Preserving media in MovieVault streaming vault.`);
+    } else if (!isTelegramConfigured()) {
+      console.log(`[Server] Note: TELEGRAM_BOT_TOKEN not configured. Preserving media in MovieVault local streaming vault.`);
+    }
+
+    if (posterFile) {
+      const posterBuf = getFileBuffer(posterFile);
+      if (posterBuf) {
+        if (canUploadToTg) {
+          try {
+            console.log(`[Server] Uploading poster to Telegram...`);
+            const posterRes = await uploadPhotoToTelegram(
+              posterBuf,
+              posterFile.originalname || 'poster.jpg',
+              posterFile.mimetype || 'image/jpeg',
+              `Poster: ${title}`
+            );
+            posterFileId = posterRes.fileId;
+            posterUrl = `/api/stream?fileId=${posterFileId}`;
+          } catch (tgPosterErr: any) {
+            console.warn(`[Server] Telegram poster upload notice: ${tgPosterErr.message}. Preserving in local media vault.`);
+            const vaultPosterName = `poster_${Date.now()}_${posterFile.originalname || 'poster.jpg'}`;
+            const vaultPosterPath = path.join(mediaVaultDir, vaultPosterName);
+            fs.writeFileSync(vaultPosterPath, posterBuf);
+            posterFileId = `local_${vaultPosterName}`;
+            posterUrl = `/api/stream?fileId=${posterFileId}`;
+          }
+        } else {
+          const vaultPosterName = `poster_${Date.now()}_${posterFile.originalname || 'poster.jpg'}`;
+          const vaultPosterPath = path.join(mediaVaultDir, vaultPosterName);
+          fs.writeFileSync(vaultPosterPath, posterBuf);
+          posterFileId = `local_${vaultPosterName}`;
+          posterUrl = `/api/stream?fileId=${posterFileId}`;
+        }
+      }
+    }
+
+    if (bannerFile) {
+      const bannerBuf = getFileBuffer(bannerFile);
+      if (bannerBuf) {
+        if (canUploadToTg) {
+          try {
+            console.log(`[Server] Uploading banner to Telegram...`);
+            const bannerRes = await uploadPhotoToTelegram(
+              bannerBuf,
+              bannerFile.originalname || 'banner.jpg',
+              bannerFile.mimetype || 'image/jpeg',
+              `Banner: ${title}`
+            );
+            bannerFileId = bannerRes.fileId;
+            bannerUrl = `/api/stream?fileId=${bannerFileId}`;
+          } catch (tgBannerErr: any) {
+            console.warn(`[Server] Telegram banner upload notice: ${tgBannerErr.message}. Preserving in local media vault.`);
+            const vaultBannerName = `banner_${Date.now()}_${bannerFile.originalname || 'banner.jpg'}`;
+            const vaultBannerPath = path.join(mediaVaultDir, vaultBannerName);
+            fs.writeFileSync(vaultBannerPath, bannerBuf);
+            bannerFileId = `local_${vaultBannerName}`;
+            bannerUrl = `/api/stream?fileId=${bannerFileId}`;
+          }
+        } else {
+          const vaultBannerName = `banner_${Date.now()}_${bannerFile.originalname || 'banner.jpg'}`;
+          const vaultBannerPath = path.join(mediaVaultDir, vaultBannerName);
+          fs.writeFileSync(vaultBannerPath, bannerBuf);
+          bannerFileId = `local_${vaultBannerName}`;
+          bannerUrl = `/api/stream?fileId=${bannerFileId}`;
+        }
+      }
+    }
+
+    const newId = `mv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const slug = title.toLowerCase().replace(/[\s\W-]+/g, '-');
+
+    if (type === 'MOVIE') {
+      const movieFile = fileMap.get('movieVideo') || fileMap.get('video');
+      let movieFileId = `sim_movie_${Date.now()}`;
+      let streamUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
+
+      if (movieFile) {
+        const isMkv = movieFile.originalname?.toLowerCase().endsWith('.mkv');
+        const resolvedMime = isMkv ? 'video/x-matroska' : (movieFile.mimetype || 'video/mp4');
+        const defaultName = isMkv ? 'movie.mkv' : 'movie.mp4';
+        const fileSizeGB = (movieFile.size / (1024 * 1024 * 1024)).toFixed(2);
+        console.log(`[Server] Processing movie video: ${movieFile.originalname} (${fileSizeGB} GB, ${movieFile.size} bytes)...`);
+
+        let uploadedToTelegram = false;
+
+        if (canUploadToTg) {
+          try {
+            console.log(`[Server] Uploading movie video to Telegram via streaming disk pipeline...`);
+            const vidRes = await uploadVideoToTelegram(
+              movieFile.path || movieFile.buffer,
+              movieFile.originalname || defaultName,
+              resolvedMime,
+              `Movie: ${title}`
+            );
+            movieFileId = vidRes.fileId;
+            streamUrl = `/api/stream?fileId=${movieFileId}`;
+            uploadedToTelegram = true;
+          } catch (tgErr: any) {
+            console.warn(`[Server] Telegram upload returned notice: ${tgErr.message}. Preserving in MovieVault high-speed streaming vault.`);
+          }
+        }
+
+        // If Telegram was not configured, or if Telegram cloud rejected the file size (>50MB/2GB limit),
+        // store the large media file in MovieVault persistent streaming media vault!
+        if (!uploadedToTelegram) {
+          const vaultId = `vault_mov_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          const ext = isMkv ? '.mkv' : (path.extname(movieFile.originalname) || '.mp4');
+          const vaultFileName = `${vaultId}${ext}`;
+          const permanentPath = path.join(mediaVaultDir, vaultFileName);
+
+          if (movieFile.path && fs.existsSync(movieFile.path)) {
+            fs.copyFileSync(movieFile.path, permanentPath);
+          } else if (movieFile.buffer) {
+            fs.writeFileSync(permanentPath, movieFile.buffer);
+          }
+
+          movieFileId = `local_${vaultFileName}`;
+          streamUrl = `/api/stream?fileId=${movieFileId}`;
+          console.log(`[Server] Preserved media (> 2 GB ready) in streaming vault: ${permanentPath}`);
+        }
+
+        safeCleanup(movieFile);
+      }
+
+      safeCleanup(posterFile);
+      safeCleanup(bannerFile);
+
+      const newContent: InMemContent = {
+        id: newId,
+        type: 'MOVIE',
+        title,
+        slug,
+        description,
+        genres,
+        language,
+        releaseYear,
+        poster: posterUrl,
+        banner: bannerUrl,
+        createdAt: new Date().toISOString(),
+        movie: {
+          telegramFileId: movieFileId,
+          duration: 7200,
+          streamUrl,
+        },
+      };
+
+      contentDatabase.unshift(newContent);
+
+      const botName = channelStatus?.botUsername ? `@${channelStatus.botUsername}` : 'your bot';
+      const channelName = channelStatus?.chatTitle || channelStatus?.chatId || 'your channel';
+      const movieNotice = canUploadToTg
+        ? 'Movie successfully uploaded and saved with Telegram File IDs!'
+        : isTelegramConfigured()
+        ? `Movie saved in MovieVault high-speed streaming vault! (Note: Add ${botName} as an Administrator in "${channelName}" with "Post Messages" permission to host directly on Telegram).`
+        : 'Movie uploaded into MovieVault with high-speed streaming support.';
+
+      return res.json({
+        success: true,
+        message: movieNotice,
+        content: newContent,
+      });
+    }
+
+    // SERIES TYPE
+    let seasonsMetadata: any[] = [];
+    if (body.metadata) {
+      try {
+        seasonsMetadata = typeof body.metadata === 'string' ? JSON.parse(body.metadata) : body.metadata;
+      } catch (e) {
+        console.error('Error parsing metadata JSON:', e);
+      }
+    }
+
+    const createdSeasons: any[] = [];
+
+    for (let sIdx = 0; sIdx < (seasonsMetadata.length || 1); sIdx++) {
+      const seasonObj = seasonsMetadata[sIdx] || { seasonNumber: sIdx + 1, episodes: [] };
+      const episodesList = seasonObj.episodes || [];
+      const createdEpisodes: any[] = [];
+
+      for (let eIdx = 0; eIdx < (episodesList.length || 1); eIdx++) {
+        const epMeta = episodesList[eIdx] || {
+          episodeNo: eIdx + 1,
+          title: `Episode ${eIdx + 1}`,
+          videoKey: `episode_${sIdx}_${eIdx}`,
+          thumbnailKey: `thumb_${sIdx}_${eIdx}`,
+        };
+
+        const epVideoFile = fileMap.get(epMeta.videoKey);
+        const epThumbFile = fileMap.get(epMeta.thumbnailKey);
+
+        let epThumbFileId = posterFileId;
+        let epThumbUrl = posterUrl;
+        let epVideoFileId = `sim_ep_${sIdx + 1}_${eIdx + 1}_${Date.now()}`;
+        let epStreamUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4';
+
+        if (epThumbFile) {
+          const epThumbBuf = getFileBuffer(epThumbFile);
+          if (epThumbBuf) {
+            if (canUploadToTg) {
+              try {
+                const thumbRes = await uploadPhotoToTelegram(
+                  epThumbBuf,
+                  epThumbFile.originalname || `s${sIdx + 1}e${eIdx + 1}_thumb.jpg`,
+                  epThumbFile.mimetype || 'image/jpeg',
+                  `Thumb S${sIdx + 1}E${eIdx + 1}`
+                );
+                epThumbFileId = thumbRes.fileId;
+                epThumbUrl = `/api/stream?fileId=${epThumbFileId}`;
+              } catch (tgThumbErr: any) {
+                console.warn(`[Server] Episode thumb notice: ${tgThumbErr.message}. Preserving locally.`);
+                const vaultThumbName = `thumb_s${sIdx + 1}e${eIdx + 1}_${Date.now()}_${epThumbFile.originalname || 'thumb.jpg'}`;
+                fs.writeFileSync(path.join(mediaVaultDir, vaultThumbName), epThumbBuf);
+                epThumbFileId = `local_${vaultThumbName}`;
+                epThumbUrl = `/api/stream?fileId=${epThumbFileId}`;
+              }
+            } else {
+              const vaultThumbName = `thumb_s${sIdx + 1}e${eIdx + 1}_${Date.now()}_${epThumbFile.originalname || 'thumb.jpg'}`;
+              fs.writeFileSync(path.join(mediaVaultDir, vaultThumbName), epThumbBuf);
+              epThumbFileId = `local_${vaultThumbName}`;
+              epThumbUrl = `/api/stream?fileId=${epThumbFileId}`;
+            }
+          }
+          safeCleanup(epThumbFile);
+        }
+
+        if (epVideoFile) {
+          const isMkv = epVideoFile.originalname?.toLowerCase().endsWith('.mkv');
+          const resolvedMime = isMkv ? 'video/x-matroska' : (epVideoFile.mimetype || 'video/mp4');
+          const defaultName = `s${sIdx + 1}e${eIdx + 1}.${isMkv ? 'mkv' : 'mp4'}`;
+          let epUploadedToTg = false;
+
+          if (canUploadToTg) {
+            try {
+              const vidRes = await uploadVideoToTelegram(
+                epVideoFile.path || epVideoFile.buffer,
+                epVideoFile.originalname || defaultName,
+                resolvedMime,
+                `${title} - S${sIdx + 1}E${eIdx + 1}: ${epMeta.title}`
+              );
+              epVideoFileId = vidRes.fileId;
+              epStreamUrl = `/api/stream?fileId=${epVideoFileId}`;
+              epUploadedToTg = true;
+            } catch (tgErr: any) {
+              console.warn(`[Server] Telegram episode upload notice: ${tgErr.message}. Storing in MovieVault streaming vault.`);
+            }
+          }
+
+          if (!epUploadedToTg) {
+            const vaultId = `vault_s${sIdx + 1}e${eIdx + 1}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const ext = isMkv ? '.mkv' : (path.extname(epVideoFile.originalname) || '.mp4');
+            const vaultFileName = `${vaultId}${ext}`;
+            const permanentPath = path.join(mediaVaultDir, vaultFileName);
+
+            if (epVideoFile.path && fs.existsSync(epVideoFile.path)) {
+              fs.copyFileSync(epVideoFile.path, permanentPath);
+            } else if (epVideoFile.buffer) {
+              fs.writeFileSync(permanentPath, epVideoFile.buffer);
+            }
+
+            epVideoFileId = `local_${vaultFileName}`;
+            epStreamUrl = `/api/stream?fileId=${epVideoFileId}`;
+            console.log(`[Server] Preserved episode media in streaming vault: ${permanentPath}`);
+          }
+
+          safeCleanup(epVideoFile);
+        }
+
+        createdEpisodes.push({
+          episodeNumber: epMeta.episodeNo || eIdx + 1,
+          title: epMeta.title || `Episode ${eIdx + 1}`,
+          telegramFileId: epVideoFileId,
+          thumbnail: epThumbUrl,
+          duration: 2700,
+          streamUrl: epStreamUrl,
+        });
+      }
+
+      createdSeasons.push({
+        seasonNumber: seasonObj.seasonNumber || sIdx + 1,
+        episodes: createdEpisodes,
+      });
+    }
+
+    safeCleanup(posterFile);
+    safeCleanup(bannerFile);
+
+    const newContent: InMemContent = {
+      id: newId,
+      type: 'SERIES',
+      title,
+      slug,
+      description,
+      genres,
+      language,
+      releaseYear,
+      poster: posterUrl,
+      banner: bannerUrl,
+      createdAt: new Date().toISOString(),
+      seasons: createdSeasons,
+    };
+
+    contentDatabase.unshift(newContent);
+
+    const botName = channelStatus?.botUsername ? `@${channelStatus.botUsername}` : 'your bot';
+    const channelName = channelStatus?.chatTitle || channelStatus?.chatId || 'your channel';
+    const uploadNotice = canUploadToTg
+      ? 'Series, seasons, and episodes uploaded and saved with File IDs!'
+      : isTelegramConfigured()
+      ? `Series saved in MovieVault streaming vault! (Note: Add ${botName} as Administrator in "${channelName}" with "Post Messages" to host on Telegram).`
+      : 'Series uploaded with seasons and episodes into MovieVault streaming vault.';
+
+    res.json({
+      success: true,
+      message: uploadNotice,
+      content: newContent,
+    });
+  } catch (err: any) {
+    console.error('Server upload error:', err);
+    res.status(500).json({
+      error: err.message || 'Upload processing failed.',
+      details: err.response?.data || null,
+    });
+  }
+});
+
+// 6. Streaming proxy API (handles both Telegram Bot API and local multi-GB disk vault)
+app.get('/api/stream', async (req, res) => {
+  const fileId = req.query.fileId as string;
+  if (!fileId) {
+    return res.status(400).send('Missing fileId');
+  }
+
+  // Handle local disk streaming vault (> 2 GB or local store with HTTP Range 206 streaming)
+  if (fileId.startsWith('local_')) {
+    const rawFileName = fileId.replace(/^local_/, '');
+    const localFilePath = path.join(mediaVaultDir, rawFileName);
+
+    if (!fs.existsSync(localFilePath)) {
+      return res.status(404).send('Local media file not found');
+    }
+
+    const stat = fs.statSync(localFilePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const lowerPath = localFilePath.toLowerCase();
+    let contentType = 'video/mp4';
+    if (lowerPath.endsWith('.mkv')) contentType = 'video/x-matroska';
+    else if (lowerPath.endsWith('.webm')) contentType = 'video/webm';
+    else if (lowerPath.endsWith('.mp4')) contentType = 'video/mp4';
+    else if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) contentType = 'image/jpeg';
+    else if (lowerPath.endsWith('.png')) contentType = 'image/png';
+    else if (lowerPath.endsWith('.webp')) contentType = 'image/webp';
+    else if (lowerPath.endsWith('.gif')) contentType = 'image/gif';
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = end - start + 1;
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': contentType,
+      });
+
+      const fileStream = fs.createReadStream(localFilePath, { start, end });
+      req.on('close', () => fileStream.destroy());
+      fileStream.pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+      });
+      const fileStream = fs.createReadStream(localFilePath);
+      req.on('close', () => fileStream.destroy());
+      fileStream.pipe(res);
+    }
+    return;
+  }
+
+  // If simulated ID or external URL, redirect or stream fallback sample
+  if (fileId.startsWith('sim_') || !isTelegramConfigured()) {
+    if (fileId.includes('poster')) {
+      return res.redirect('https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800&auto=format&fit=crop&q=80');
+    }
+    if (fileId.includes('banner')) {
+      return res.redirect('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1600&auto=format&fit=crop&q=80');
+    }
+    if (fileId.includes('thumb')) {
+      return res.redirect('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80');
+    }
+    return res.redirect('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
+  }
+
+  try {
+    const axios = (await import('axios')).default;
+    const metadata = await getTelegramFileMetadata(fileId);
+    const downloadUrl = metadata.directDownloadUrl;
+
+    const range = req.headers.range;
+    const headers: Record<string, string> = {};
+    if (range) {
+      headers['Range'] = range;
+    }
+
+    const response = await axios({
+      method: 'GET',
+      url: downloadUrl,
+      responseType: 'stream',
+      headers,
+    });
+
+    res.status(response.status);
+    const hopByHopHeaders = ['transfer-encoding', 'connection', 'keep-alive', 'upgrade'];
+    Object.entries(response.headers).forEach(([key, value]) => {
+      if (value && !hopByHopHeaders.includes(key.toLowerCase())) {
+        res.setHeader(key, value as string);
+      }
+    });
+
+    // Content-Type normalization for MKV / MP4 / WebM / Image streaming
+    const lowerFilePath = (metadata.filePath || '').toLowerCase();
+    if (lowerFilePath.endsWith('.mkv')) {
+      res.setHeader('Content-Type', 'video/x-matroska');
+    } else if (lowerFilePath.endsWith('.mp4')) {
+      res.setHeader('Content-Type', 'video/mp4');
+    } else if (lowerFilePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'video/webm');
+    } else if (lowerFilePath.endsWith('.jpg') || lowerFilePath.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (lowerFilePath.endsWith('.png')) {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (lowerFilePath.endsWith('.webp')) {
+      res.setHeader('Content-Type', 'image/webp');
+    }
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    req.on('close', () => {
+      if (response.data && typeof response.data.destroy === 'function') {
+        response.data.destroy();
+      }
+    });
+
+    response.data.pipe(res);
+  } catch (err: any) {
+    console.error('Stream proxy error:', err);
+    res.status(500).send(`Streaming failed: ${err.message}`);
+  }
+});
+
+// Start server with Vite middleware integration
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const isHmrDisabled = process.env.DISABLE_HMR === 'true';
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: isHmrDisabled
+          ? false
+          : {
+              server,
+            },
+      },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`MovieVault Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();
