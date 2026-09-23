@@ -20,8 +20,8 @@ const server = http.createServer(app);
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Disk storage directories for high-performance processing of files > 2 GB without memory limits
-const uploadDir = path.join(os.tmpdir(), 'movievault_uploads');
-const mediaVaultDir = path.join(os.tmpdir(), 'movievault_media');
+const uploadDir = path.join(process.cwd(), 'movievault_uploads');
+const mediaVaultDir = path.join(process.cwd(), 'movievault_media');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(mediaVaultDir)) fs.mkdirSync(mediaVaultDir, { recursive: true });
 
