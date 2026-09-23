@@ -79,106 +79,7 @@ interface InMemContent {
 }
 
 // Seed initial high quality content
-const contentDatabase: InMemContent[] = [
-  {
-    id: 'c_vault_1',
-    type: 'SERIES',
-    title: 'Cyberpunk Odyssey',
-    slug: 'cyberpunk-odyssey',
-    description: 'In a neon-drenched megacity running on rogue AI systems, a lone data archivist uncovers encrypted memories belonging to the syndicate that rules the underworld.',
-    genres: ['Sci-Fi', 'Action', 'Thriller'],
-    language: 'English',
-    releaseYear: 2025,
-    poster: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1600&auto=format&fit=crop&q=80',
-    createdAt: new Date().toISOString(),
-    seasons: [
-      {
-        seasonNumber: 1,
-        episodes: [
-          {
-            episodeNumber: 1,
-            title: 'Protocol 0: Ghost in the Core',
-            telegramFileId: 'TG_FILE_S1_E1_SIMULATED',
-            thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
-            duration: 2740,
-            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-          },
-          {
-            episodeNumber: 2,
-            title: 'Neural Cascade',
-            telegramFileId: 'TG_FILE_S1_E2_SIMULATED',
-            thumbnail: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
-            duration: 2890,
-            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-          },
-          {
-            episodeNumber: 3,
-            title: 'Sublevel 88',
-            telegramFileId: 'TG_FILE_S1_E3_SIMULATED',
-            thumbnail: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600&auto=format&fit=crop&q=80',
-            duration: 3100,
-            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'c_vault_2',
-    type: 'MOVIE',
-    title: 'Solaris Drift',
-    slug: 'solaris-drift',
-    description: 'An orbital mining vessel encounters a spatial anomaly near Saturn’s rings that bends gravitational time dilations, forcing the crew to make an impossible choice.',
-    genres: ['Sci-Fi', 'Drama', 'Adventure'],
-    language: 'English',
-    releaseYear: 2024,
-    poster: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=1600&auto=format&fit=crop&q=80',
-    createdAt: new Date().toISOString(),
-    movie: {
-      telegramFileId: 'TG_FILE_MOVIE_SOLARIS_SIMULATED',
-      duration: 7200,
-      streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-    },
-  },
-  {
-    id: 'c_vault_3',
-    type: 'SERIES',
-    title: 'The Northern Veil',
-    slug: 'the-northern-veil',
-    description: 'A detective with a fragmented past investigates a series of mysterious disappearances in an isolated Norwegian fjord where daylight vanishes for months.',
-    genres: ['Mystery', 'Crime', 'Drama'],
-    language: 'Norwegian',
-    releaseYear: 2024,
-    poster: 'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=800&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1483921020237-2ff51e8e4b22?w=1600&auto=format&fit=crop&q=80',
-    createdAt: new Date().toISOString(),
-    seasons: [
-      {
-        seasonNumber: 1,
-        episodes: [
-          {
-            episodeNumber: 1,
-            title: 'Black Ice',
-            telegramFileId: 'TG_FILE_NV_S1_E1_SIMULATED',
-            thumbnail: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600&auto=format&fit=crop&q=80',
-            duration: 3200,
-            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-          },
-          {
-            episodeNumber: 2,
-            title: 'Glacial Echo',
-            telegramFileId: 'TG_FILE_NV_S1_E2_SIMULATED',
-            thumbnail: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80',
-            duration: 3050,
-            streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-          },
-        ],
-      },
-    ],
-  },
-];
+const contentDatabase: InMemContent[] = [];
 
 // Helper to check if telegram credentials are set
 function isTelegramConfigured() {
@@ -276,6 +177,17 @@ app.get('/api/content', (req, res) => {
     items: contentDatabase,
     total: contentDatabase.length,
   });
+});
+
+app.delete('/api/content/:id', (req, res) => {
+  const { id } = req.params;
+  const index = contentDatabase.findIndex(c => c.id === id);
+  if (index !== -1) {
+    contentDatabase.splice(index, 1);
+    res.json({ success: true, message: 'Deleted successfully' });
+  } else {
+    res.status(404).json({ error: 'Not found' });
+  }
 });
 
 // Helper to retrieve buffer safely from disk or memory

@@ -26,6 +26,7 @@ import {
   Server,
   Zap,
   Download,
+  Trash2,
 } from 'lucide-react';
 import AdminUploadPage from '../app/admin/upload/page.tsx';
 
@@ -107,6 +108,8 @@ export default function App() {
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoCurrentTime, setVideoCurrentTime] = useState(0);
   const [videoVolume, setVideoVolume] = useState(1);
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch catalog on mount and when returning to catalog tabs
   useEffect(() => {
@@ -119,6 +122,20 @@ export default function App() {
       fetchContent();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    if (showControls && !isVideoPaused) {
+      controlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
+    }
+    return () => {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
+  }, [showControls, isVideoPaused]);
 
   const fetchContent = async () => {
     try {
@@ -1082,7 +1099,24 @@ model Episode {
                     <Play className="w-4 h-4 fill-black" />
                     Play Now
                   </button>
-                  <span className="text-xs text-zinc-400 font-medium">
+                  <button
+                    onClick={async () => {
+                      if (window.confirm('Are you sure you want to delete this content?')) {
+                        try {
+                          await fetch(`/api/content/${selectedContent.id}`, { method: 'DELETE' });
+                          setSelectedContent(null);
+                          fetchContent();
+                        } catch (err) {
+                          alert('Failed to delete content');
+                        }
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </button>
+                  <span className="text-xs text-zinc-400 font-medium ml-2">
                     {selectedContent.releaseYear} • {selectedContent.genres.join(', ')}
                   </span>
                 </div>
@@ -1168,12 +1202,15 @@ model Episode {
 
       {/* Netflix Fullscreen-Style Video Player */}
       {isPlaying && activeEpisode && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+        <div 
+          className="fixed inset-0 z-50 bg-black flex flex-col"
+          onClick={() => setShowControls(prev => !prev)}
+        >
           {/* Top Bar Controls */}
-          <div className="absolute top-0 inset-x-0 z-30 p-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent flex items-center justify-between">
+          <div className={`absolute top-0 inset-x-0 z-30 p-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent flex items-center justify-between transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             <div className="flex items-center gap-4">
               <button
-                onClick={() => setIsPlaying(false)}
+                onClick={(e) => { e.stopPropagation(); setIsPlaying(false); }}
                 className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
               >
                 <X className="w-5 h-5" />
@@ -1196,6 +1233,7 @@ model Episode {
                   target="_blank"
                   rel="noopener noreferrer"
                   download
+                  onClick={(e) => e.stopPropagation()}
                   className="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs transition"
                   title="Direct stream or download video"
                 >
@@ -1216,6 +1254,7 @@ model Episode {
               src={activeEpisode.streamUrl}
               autoPlay
               controls={false}
+              playsInline
               className="w-full h-full max-h-screen object-contain"
               onPlay={() => setIsVideoPaused(false)}
               onPause={() => setIsVideoPaused(true)}
@@ -1235,7 +1274,10 @@ model Episode {
           </div>
 
           {/* Bottom Video Controls Overlay */}
-          <div className="absolute bottom-0 inset-x-0 z-30 p-6 bg-gradient-to-t from-black via-black/80 to-transparent space-y-3">
+          <div 
+            className={`absolute bottom-0 inset-x-0 z-30 p-6 bg-gradient-to-t from-black via-black/80 to-transparent space-y-3 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Timeline Progress Bar */}
             <div className="relative flex items-center group">
               <input
