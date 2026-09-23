@@ -211,7 +211,7 @@ export default function AdminUploadPage() {
 
     try {
       const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const CHUNK_SIZE = 15 * 1024 * 1024; // 15 MB per chunk (well below Cloud Run's 32 MB limit)
+      const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk(well below Cloud Run's 32 MB limit)
 
       // Helper to upload a large file in 15 MB chunks to bypass proxy/Cloud Run 32MB single-request limit
       const uploadFileInChunks = async (file: File, fileKey: string, label: string) => {
