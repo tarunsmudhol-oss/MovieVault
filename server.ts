@@ -339,24 +339,16 @@ app.post('/api/upload/chunk', (req, res, next) => {
       const assembledFileName = `assembled_${uploadId}__SEP__${fileKey}__SEP__${sanitizedName}`;
       const assembledPath = path.join(uploadDir, assembledFileName);
 
-      const writeStream = fs.createWriteStream(assembledPath);
-
+      // Assemble sequentially using appendFileSync to avoid writeStream memory buffering OOM
       for (let i = 0; i < totalChunks; i++) {
         const cPath = path.join(uploadDir, `chunk_${uploadId}_${fileKey}_${i}`);
         if (fs.existsSync(cPath)) {
-          const chunkData = fs.readFileSync(cPath);
-          writeStream.write(chunkData);
+          fs.appendFileSync(assembledPath, fs.readFileSync(cPath));
           try {
             fs.unlinkSync(cPath);
           } catch {}
         }
       }
-      writeStream.end();
-
-      await new Promise<void>((resolve, reject) => {
-        writeStream.on('finish', () => resolve());
-        writeStream.on('error', (err) => reject(err));
-      });
 
       const totalSize = fs.statSync(assembledPath).size;
       const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
