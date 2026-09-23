@@ -733,10 +733,12 @@ model Episode {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1">
-        {activeTab === 'admin' ? (
+      <main className="flex-1 pb-20 md:pb-0"> {/* Padding bottom for mobile nav */}
+        <div style={{ display: activeTab === 'admin' ? 'block' : 'none' }}>
           <AdminUploadPage />
-        ) : activeTab === 'docs' ? (
+        </div>
+
+        {activeTab === 'docs' && (
           /* Production Telegram Fix Code Inspector */
           <div className="max-w-6xl mx-auto p-6 md:p-10 space-y-8">
             <div className="border-b border-zinc-800 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -870,7 +872,9 @@ model Episode {
               </div>
             </div>
           </div>
-        ) : (
+        )}
+
+        {(activeTab === 'home' || activeTab === 'movies' || activeTab === 'series') && (
           /* MovieVault Netflix-style Catalog & Billboard */
           <div className="space-y-12 pb-20">
             {/* Hero Billboard */}
@@ -1066,6 +1070,14 @@ model Episode {
           </div>
         )}
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 bg-black/95 backdrop-blur border-t border-zinc-800 z-40 flex items-center justify-around py-3">
+        <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-white' : 'text-zinc-500'}`}><Film className="w-5 h-5" /><span className="text-[10px]">Browse</span></button>
+        <button onClick={() => setActiveTab('series')} className={`flex flex-col items-center gap-1 ${activeTab === 'series' ? 'text-white' : 'text-zinc-500'}`}><Tv className="w-5 h-5" /><span className="text-[10px]">Series</span></button>
+        <button onClick={() => setActiveTab('movies')} className={`flex flex-col items-center gap-1 ${activeTab === 'movies' ? 'text-white' : 'text-zinc-500'}`}><Play className="w-5 h-5" /><span className="text-[10px]">Movies</span></button>
+        <button onClick={() => setActiveTab('admin')} className={`flex flex-col items-center gap-1 ${activeTab === 'admin' ? 'text-red-500' : 'text-zinc-500'}`}><Upload className="w-5 h-5" /><span className="text-[10px]">Upload</span></button>
+      </div>
 
       {/* Media Detail & Season Episodes Modal */}
       {selectedContent && !isPlaying && (
@@ -1358,8 +1370,13 @@ model Episode {
                   onClick={() => {
                     if (document.fullscreenElement) {
                       document.exitFullscreen();
-                    } else {
-                      document.documentElement.requestFullscreen();
+                    } else if (videoRef.current) {
+                      if (videoRef.current.requestFullscreen) {
+                        videoRef.current.requestFullscreen();
+                      } else if ((videoRef.current as any).webkitEnterFullscreen) {
+                        // iOS Safari fallback
+                        (videoRef.current as any).webkitEnterFullscreen();
+                      }
                     }
                   }}
                   className="p-2 text-zinc-400 hover:text-white transition"
