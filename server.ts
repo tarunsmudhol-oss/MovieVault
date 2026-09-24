@@ -272,38 +272,30 @@ app.post('/api/upload/chunk', (req, res, next) => {
       });
     }
 
-    const chunkFileName = `chunk_${uploadId}_${fileKey}_${chunkIndex}`;
-    const chunkPath = path.join(uploadDir, chunkFileName);
+    const sanitizedName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const assembledFileName = `assembled_${uploadId}__SEP__${fileKey}__SEP__${sanitizedName}`;
+    const assembledPath = path.join(uploadDir, assembledFileName);
 
+    // If first chunk, reset assembled file to ensure clean write
+    if (chunkIndex === 0 && fs.existsSync(assembledPath)) {
+      try { fs.unlinkSync(assembledPath); } catch {}
+    }
+
+    // Stream-append chunk directly into assembled file
     if (file.path && fs.existsSync(file.path)) {
-      fs.copyFileSync(file.path, chunkPath);
+      fs.appendFileSync(assembledPath, fs.readFileSync(file.path));
       try {
         fs.unlinkSync(file.path);
       } catch {}
     } else if (file.buffer) {
-      fs.writeFileSync(chunkPath, file.buffer);
+      fs.appendFileSync(assembledPath, file.buffer);
     }
 
-    // Check if this is the final chunk: assemble sequentially
+    // If final chunk, immediately respond - file is already fully assembled!
     if (chunkIndex === totalChunks - 1) {
-      const sanitizedName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const assembledFileName = `assembled_${uploadId}__SEP__${fileKey}__SEP__${sanitizedName}`;
-      const assembledPath = path.join(uploadDir, assembledFileName);
-
-      // Assemble sequentially using appendFileSync to avoid writeStream memory buffering OOM
-      for (let i = 0; i < totalChunks; i++) {
-        const cPath = path.join(uploadDir, `chunk_${uploadId}_${fileKey}_${i}`);
-        if (fs.existsSync(cPath)) {
-          fs.appendFileSync(assembledPath, fs.readFileSync(cPath));
-          try {
-            fs.unlinkSync(cPath);
-          } catch {}
-        }
-      }
-
-      const totalSize = fs.statSync(assembledPath).size;
+      const totalSize = fs.existsSync(assembledPath) ? fs.statSync(assembledPath).size : 0;
       const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-      console.log(`[Chunk Assembler] Completed assembling ${fileKey} (${totalSizeMB} MB, ${totalChunks} chunks) -> ${assembledFileName}`);
+      console.log(`[Chunk Assembler] Completed streaming ${fileKey} (${totalSizeMB} MB, ${totalChunks} chunks) -> ${assembledFileName}`);
 
       return res.json({
         success: true,
@@ -536,7 +528,12 @@ app.post('/api/upload', (req, res, next) => {
           const permanentPath = path.join(mediaVaultDir, vaultFileName);
 
           if (movieFile.path && fs.existsSync(movieFile.path)) {
-            fs.copyFileSync(movieFile.path, permanentPath);
+            try {
+              fs.renameSync(movieFile.path, permanentPath);
+            } catch {
+              fs.copyFileSync(movieFile.path, permanentPath);
+              try { fs.unlinkSync(movieFile.path); } catch {}
+            }
           } else if (movieFile.buffer) {
             fs.writeFileSync(permanentPath, movieFile.buffer);
           }
@@ -681,7 +678,12 @@ app.post('/api/upload', (req, res, next) => {
             const permanentPath = path.join(mediaVaultDir, vaultFileName);
 
             if (epVideoFile.path && fs.existsSync(epVideoFile.path)) {
-              fs.copyFileSync(epVideoFile.path, permanentPath);
+              try {
+                fs.renameSync(epVideoFile.path, permanentPath);
+              } catch {
+                fs.copyFileSync(epVideoFile.path, permanentPath);
+                try { fs.unlinkSync(epVideoFile.path); } catch {}
+              }
             } else if (epVideoFile.buffer) {
               fs.writeFileSync(permanentPath, epVideoFile.buffer);
             }

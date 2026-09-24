@@ -211,9 +211,9 @@ export default function AdminUploadPage() {
 
     try {
       const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk(well below Cloud Run's 32 MB limit)
+      const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB per chunk (fast streaming, reduces HTTP requests 4x)
 
-      // Helper to upload a large file in 15 MB chunks to bypass proxy/Cloud Run 32MB single-request limit
+      // Helper to upload a large file in 8 MB chunks to bypass proxy/Cloud Run limits
       const uploadFileInChunks = async (file: File, fileKey: string, label: string) => {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
@@ -235,10 +235,22 @@ export default function AdminUploadPage() {
           setProgress(percent);
           setMessage(`Streaming ${label} (${fileSizeMB} MB): Chunk ${chunkIdx + 1} of ${totalChunks}...`);
 
-          await axios.post('/api/upload/chunk', chunkForm, {
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-          });
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              await axios.post('/api/upload/chunk', chunkForm, {
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity,
+                timeout: 120000,
+              });
+              break;
+            } catch (chunkErr) {
+              retries--;
+              if (retries === 0) throw chunkErr;
+              console.warn(`[Upload] Chunk ${chunkIdx + 1}/${totalChunks} retry (${retries} attempts left)...`);
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
         }
       };
 
