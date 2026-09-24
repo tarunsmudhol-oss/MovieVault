@@ -22,8 +22,23 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 // Disk storage directories for high-performance processing of files > 2 GB without memory limits
 const uploadDir = path.join(process.cwd(), 'movievault_uploads');
 const mediaVaultDir = path.join(process.cwd(), 'movievault_media');
+const dataDir = path.join(process.cwd(), 'movievault_data');
+
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(mediaVaultDir)) fs.mkdirSync(mediaVaultDir, { recursive: true });
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+// Prevent server crashes from client disconnects (EPIPE, ECONNRESET on mobile 4G/5G)
+process.on('uncaughtException', (err: any) => {
+  if (err?.code === 'ECONNRESET' || err?.code === 'EPIPE' || err?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+    return;
+  }
+  console.error('[MovieVault Server] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[MovieVault Server] Unhandled Rejection:', reason);
+});
 
 // Disk storage for multer to stream files > 2 GB cleanly to disk
 const storage = multer.diskStorage({
@@ -47,7 +62,7 @@ const upload = multer({
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// In-memory catalog database for demonstration & local storage
+// In-memory & disk-persisted catalog database
 interface InMemContent {
   id: string;
   type: 'MOVIE' | 'SERIES';
@@ -78,8 +93,31 @@ interface InMemContent {
   }[];
 }
 
-// Seed initial high quality content
-const contentDatabase: InMemContent[] = [];
+const catalogFile = path.join(dataDir, 'catalog.json');
+
+function loadCatalog(): InMemContent[] {
+  try {
+    if (fs.existsSync(catalogFile)) {
+      const data = fs.readFileSync(catalogFile, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error loading catalog.json:', err);
+  }
+  return [];
+}
+
+export function saveCatalog(items: InMemContent[]) {
+  try {
+    fs.writeFileSync(catalogFile, JSON.stringify(items, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving catalog.json:', err);
+  }
+}
+
+// Load content from disk on boot
+const contentDatabase: InMemContent[] = loadCatalog();
 
 // Helper to check if telegram credentials are set
 function isTelegramConfigured() {
@@ -184,6 +222,7 @@ app.delete('/api/content/:id', (req, res) => {
   const index = contentDatabase.findIndex(c => c.id === id);
   if (index !== -1) {
     contentDatabase.splice(index, 1);
+    saveCatalog(contentDatabase);
     res.json({ success: true, message: 'Deleted successfully' });
   } else {
     res.status(404).json({ error: 'Not found' });
@@ -533,6 +572,7 @@ app.post('/api/upload', (req, res, next) => {
       };
 
       contentDatabase.unshift(newContent);
+      saveCatalog(contentDatabase);
 
       const botName = channelStatus?.botUsername ? `@${channelStatus.botUsername}` : 'your bot';
       const channelName = channelStatus?.chatTitle || channelStatus?.chatId || 'your channel';
@@ -689,6 +729,7 @@ app.post('/api/upload', (req, res, next) => {
     };
 
     contentDatabase.unshift(newContent);
+    saveCatalog(contentDatabase);
 
     const botName = channelStatus?.botUsername ? `@${channelStatus.botUsername}` : 'your bot';
     const channelName = channelStatus?.chatTitle || channelStatus?.chatId || 'your channel';
@@ -756,7 +797,12 @@ app.get('/api/stream', async (req, res) => {
       });
 
       const fileStream = fs.createReadStream(localFilePath, { start, end });
-      req.on('close', () => fileStream.destroy());
+      const cleanupStream = () => {
+        try { fileStream.destroy(); } catch {}
+      };
+      req.on('close', cleanupStream);
+      res.on('error', cleanupStream);
+      fileStream.on('error', cleanupStream);
       fileStream.pipe(res);
     } else {
       res.writeHead(200, {
@@ -765,7 +811,12 @@ app.get('/api/stream', async (req, res) => {
         'Accept-Ranges': 'bytes',
       });
       const fileStream = fs.createReadStream(localFilePath);
-      req.on('close', () => fileStream.destroy());
+      const cleanupStream = () => {
+        try { fileStream.destroy(); } catch {}
+      };
+      req.on('close', cleanupStream);
+      res.on('error', cleanupStream);
+      fileStream.on('error', cleanupStream);
       fileStream.pipe(res);
     }
     return;
@@ -828,16 +879,26 @@ app.get('/api/stream', async (req, res) => {
     }
     res.setHeader('Accept-Ranges', 'bytes');
 
-    req.on('close', () => {
-      if (response.data && typeof response.data.destroy === 'function') {
-        response.data.destroy();
-      }
-    });
+    const cleanupTgStream = () => {
+      try {
+        if (response.data && typeof response.data.destroy === 'function') {
+          response.data.destroy();
+        }
+      } catch {}
+    };
+
+    req.on('close', cleanupTgStream);
+    res.on('error', cleanupTgStream);
+    if (response.data && typeof response.data.on === 'function') {
+      response.data.on('error', cleanupTgStream);
+    }
 
     response.data.pipe(res);
   } catch (err: any) {
     console.error('Stream proxy error:', err);
-    res.status(500).send(`Streaming failed: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(500).send(`Streaming failed: ${err.message}`);
+    }
   }
 });
 

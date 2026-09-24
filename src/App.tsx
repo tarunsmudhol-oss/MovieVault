@@ -109,6 +109,7 @@ export default function App() {
   const [videoCurrentTime, setVideoCurrentTime] = useState(0);
   const [videoVolume, setVideoVolume] = useState(1);
   const [showControls, setShowControls] = useState(true);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch catalog on mount and when returning to catalog tabs
@@ -200,6 +201,7 @@ export default function App() {
         telegramFileId: firstEp.telegramFileId,
       });
     }
+    setVideoError(null);
     setIsVideoPaused(false);
     setIsPlaying(true);
   };
@@ -1103,17 +1105,17 @@ model Episode {
                 <h2 className="text-2xl md:text-3xl font-bold text-white drop-shadow">
                   {selectedContent.title}
                 </h2>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <button
                     onClick={() => handlePlayContent(selectedContent)}
-                    className="flex items-center gap-2 px-5 py-2 bg-white hover:bg-zinc-200 text-black font-bold rounded text-xs transition"
+                    className="flex items-center gap-2 px-5 py-2 bg-white hover:bg-zinc-200 text-black font-bold rounded-lg text-xs transition shadow-md cursor-pointer"
                   >
                     <Play className="w-4 h-4 fill-black" />
                     Play Now
                   </button>
                   <button
                     onClick={async () => {
-                      if (window.confirm('Are you sure you want to delete this content?')) {
+                      if (window.confirm(`Are you sure you want to delete "${selectedContent.title}"?`)) {
                         try {
                           await fetch(`/api/content/${selectedContent.id}`, { method: 'DELETE' });
                           setSelectedContent(null);
@@ -1123,12 +1125,12 @@ model Episode {
                         }
                       }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs transition"
+                    className="flex items-center gap-2 px-3.5 py-2 bg-red-600/80 hover:bg-red-600 text-white font-semibold rounded-lg text-xs transition border border-red-500/30 cursor-pointer"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                     Delete
                   </button>
-                  <span className="text-xs text-zinc-400 font-medium ml-2">
+                  <span className="text-xs text-zinc-300 font-medium bg-black/60 backdrop-blur px-2.5 py-1 rounded-md border border-zinc-700/60">
                     {selectedContent.releaseYear} • {selectedContent.genres.join(', ')}
                   </span>
                 </div>
@@ -1261,6 +1263,29 @@ model Episode {
 
           {/* Video element */}
           <div className="flex-1 relative flex items-center justify-center bg-black">
+            {videoError && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-black/90 text-center space-y-4">
+                <AlertCircle className="w-12 h-12 text-amber-400 animate-pulse" />
+                <h4 className="text-lg font-bold text-white">Playback Format Notice</h4>
+                <p className="text-xs sm:text-sm text-zinc-300 max-w-md leading-relaxed">
+                  {videoError}
+                </p>
+                {activeEpisode.streamUrl && (
+                  <a
+                    href={activeEpisode.streamUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    download
+                    onClick={(e) => e.stopPropagation()}
+                    className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-900/50 flex items-center gap-2 transition"
+                  >
+                    <Download className="w-4 h-4" />
+                    Direct Stream / Open in VLC or MX Player
+                  </a>
+                )}
+              </div>
+            )}
+
             <video
               ref={videoRef}
               src={activeEpisode.streamUrl}
@@ -1270,6 +1295,9 @@ model Episode {
               className="w-full h-full max-h-screen object-contain"
               onPlay={() => setIsVideoPaused(false)}
               onPause={() => setIsVideoPaused(true)}
+              onError={() => {
+                setVideoError('Your mobile browser cannot decode this video container (.mkv / 10-bit HEVC) directly. Tap below to stream or open with VLC, MX Player, or your favorite mobile video app.');
+              }}
               onTimeUpdate={() => {
                 if (videoRef.current) {
                   setVideoCurrentTime(videoRef.current.currentTime);
@@ -1287,7 +1315,7 @@ model Episode {
 
           {/* Bottom Video Controls Overlay */}
           <div 
-            className={`absolute bottom-0 inset-x-0 z-30 p-6 bg-gradient-to-t from-black via-black/80 to-transparent space-y-3 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            className={`absolute bottom-0 inset-x-0 z-30 p-4 sm:p-6 bg-gradient-to-t from-black via-black/80 to-transparent space-y-3 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Timeline Progress Bar */}
@@ -1304,12 +1332,12 @@ model Episode {
 
             {/* Bottom Buttons */}
             <div className="flex items-center justify-between pt-2">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 sm:gap-4">
                 <button
                   onClick={() => {
                     if (videoRef.current) {
                       if (videoRef.current.paused) {
-                        videoRef.current.play();
+                        videoRef.current.play().catch(() => {});
                         setIsVideoPaused(false);
                       } else {
                         videoRef.current.pause();
@@ -1317,39 +1345,39 @@ model Episode {
                       }
                     }
                   }}
-                  className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:bg-zinc-200 transition cursor-pointer"
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white text-black flex items-center justify-center hover:bg-zinc-200 transition cursor-pointer shrink-0"
                   title={isVideoPaused ? 'Play' : 'Pause'}
                 >
                   {isVideoPaused ? (
-                    <Play className="w-5 h-5 fill-black" />
+                    <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-black" />
                   ) : (
-                    <Pause className="w-5 h-5 fill-black" />
+                    <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-black" />
                   )}
                 </button>
 
                 <button
                   onClick={() => skipSeconds(-10)}
-                  className="p-2 text-zinc-400 hover:text-white transition"
+                  className="p-1.5 sm:p-2 text-zinc-400 hover:text-white transition"
                   title="Rewind 10s"
                 >
-                  <RotateCcw className="w-5 h-5" />
+                  <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
 
                 <button
                   onClick={() => skipSeconds(10)}
-                  className="p-2 text-zinc-400 hover:text-white transition"
+                  className="p-1.5 sm:p-2 text-zinc-400 hover:text-white transition"
                   title="Forward 10s"
                 >
-                  <RotateCw className="w-5 h-5" />
+                  <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
 
-                <div className="text-xs font-mono text-zinc-400">
+                <div className="text-[11px] sm:text-xs font-mono text-zinc-400 whitespace-nowrap">
                   {formatTime(videoCurrentTime)} / {formatTime(videoDuration)}
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 sm:gap-4">
+                <div className="hidden sm:flex items-center gap-2">
                   <Volume2 className="w-5 h-5 text-zinc-400" />
                   <input
                     type="range"
