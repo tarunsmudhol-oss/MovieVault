@@ -796,6 +796,8 @@ app.get('/api/stream', async (req, res) => {
         'Accept-Ranges': 'bytes',
         'Content-Length': chunksize,
         'Content-Type': contentType,
+        'Content-Disposition': `inline; filename="${path.basename(localFilePath)}"`,
+        'Access-Control-Allow-Origin': '*',
       });
 
       const fileStream = fs.createReadStream(localFilePath, { start, end });
@@ -811,6 +813,8 @@ app.get('/api/stream', async (req, res) => {
         'Content-Length': fileSize,
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
+        'Content-Disposition': `inline; filename="${path.basename(localFilePath)}"`,
+        'Access-Control-Allow-Origin': '*',
       });
       const fileStream = fs.createReadStream(localFilePath);
       const cleanupStream = () => {

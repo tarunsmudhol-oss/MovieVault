@@ -110,6 +110,7 @@ export default function App() {
   const [videoVolume, setVideoVolume] = useState(1);
   const [showControls, setShowControls] = useState(true);
   const [videoError, setVideoError] = useState<string | null>(null);
+  const [copiedStream, setCopiedStream] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch catalog on mount and when returning to catalog tabs
@@ -1243,16 +1244,13 @@ model Episode {
             <div className="flex items-center gap-3">
               {activeEpisode.streamUrl && (
                 <a
-                  href={activeEpisode.streamUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download
+                  href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs transition"
-                  title="Direct stream or download video"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-zinc-700 text-xs transition font-semibold"
+                  title="Stream in VLC or mobile video player"
                 >
-                  <Download className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Direct Stream / Save</span>
+                  <Play className="w-3.5 h-3.5 fill-red-500 text-red-500" />
+                  <span>Play in External App</span>
                 </a>
               )}
               <div className="px-3 py-1 rounded bg-red-600/20 text-red-400 border border-red-800 text-[11px] font-mono">
@@ -1266,22 +1264,58 @@ model Episode {
             {videoError && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-black/90 text-center space-y-4">
                 <AlertCircle className="w-12 h-12 text-amber-400 animate-pulse" />
-                <h4 className="text-lg font-bold text-white">Playback Format Notice</h4>
+                <h4 className="text-lg font-bold text-white">MKV / HEVC Video Stream</h4>
                 <p className="text-xs sm:text-sm text-zinc-300 max-w-md leading-relaxed">
-                  {videoError}
+                  This video is in <strong>.mkv (10-bit HEVC)</strong> format. Mobile browsers cannot decode raw MKVs, but you can stream it instantly with any video player on your phone!
                 </p>
                 {activeEpisode.streamUrl && (
-                  <a
-                    href={activeEpisode.streamUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    download
-                    onClick={(e) => e.stopPropagation()}
-                    className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-900/50 flex items-center gap-2 transition"
-                  >
-                    <Download className="w-4 h-4" />
-                    Direct Stream / Open in VLC or MX Player
-                  </a>
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md pt-2">
+                    {/* 1. Android Intent - Opens VLC / MX Player / Mi Video natively */}
+                    <a
+                      href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full sm:w-auto px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-900/50 flex items-center justify-center gap-2 transition cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-white" />
+                      Play in App (VLC / MX Player)
+                    </a>
+
+                    {/* 2. Direct VLC scheme */}
+                    <a
+                      href={`vlc://${window.location.origin}${activeEpisode.streamUrl}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full sm:w-auto px-4 py-3 rounded-xl bg-orange-600/90 hover:bg-orange-600 text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-white" />
+                      Open in VLC
+                    </a>
+
+                    {/* 3. Copy Stream URL */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const fullUrl = `${window.location.origin}${activeEpisode.streamUrl}`;
+                        navigator.clipboard.writeText(fullUrl);
+                        setCopiedStream(true);
+                        setTimeout(() => setCopiedStream(false), 3000);
+                      }}
+                      className="w-full sm:w-auto px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-700 transition cursor-pointer"
+                    >
+                      {copiedStream ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      {copiedStream ? 'Copied Link!' : 'Copy Link'}
+                    </button>
+
+                    {/* 4. Download file */}
+                    <a
+                      href={activeEpisode.streamUrl}
+                      download
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full sm:w-auto px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-800 transition cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download
+                    </a>
+                  </div>
                 )}
               </div>
             )}
