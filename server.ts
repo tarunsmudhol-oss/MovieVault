@@ -785,6 +785,27 @@ app.get('/api/stream', async (req, res) => {
     else if (lowerPath.endsWith('.webp')) contentType = 'image/webp';
     else if (lowerPath.endsWith('.gif')) contentType = 'image/gif';
 
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': 'Range, Content-Type, Accept, Origin',
+        'Access-Control-Max-Age': '86400',
+      });
+      return res.end();
+    }
+
+    if (req.method === 'HEAD') {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Content-Disposition': `inline; filename="${path.basename(localFilePath)}"`,
+        'Access-Control-Allow-Origin': '*',
+      });
+      return res.end();
+    }
+
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
       const start = parseInt(parts[0], 10);
@@ -884,6 +905,11 @@ app.get('/api/stream', async (req, res) => {
       res.setHeader('Content-Type', 'image/webp');
     }
     res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (req.method === 'HEAD') {
+      return res.end();
+    }
 
     const cleanupTgStream = () => {
       try {

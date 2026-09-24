@@ -72,6 +72,23 @@ export const resolveMediaUrl = (urlOrFileId?: string): string => {
   return `/api/stream?fileId=${encodeURIComponent(urlOrFileId)}`;
 };
 
+export const getExternalStreamLinks = (rawUrlOrFileId?: string) => {
+  const resolved = resolveMediaUrl(rawUrlOrFileId);
+  if (!resolved) return { directUrl: '', intentUrl: '', vlcUrl: '' };
+  
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  
+  const directUrl = resolved.startsWith('http') ? resolved : `${origin}${resolved}`;
+  const pathWithQuery = resolved.startsWith('http') ? resolved.replace(/^https?:\/\/[^/]+/, '') : resolved;
+  
+  // Android Intent URI compliant with Android Chrome specification
+  const intentUrl = `intent://${host}${pathWithQuery}#Intent;scheme=https;type=video/*;action=android.intent.action.VIEW;end`;
+  const vlcUrl = `vlc://${directUrl}`;
+  
+  return { directUrl, intentUrl, vlcUrl };
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'series' | 'movies' | 'admin' | 'docs'>('home');
   const [contentList, setContentList] = useState<ContentItem[]>([]);
@@ -1114,16 +1131,30 @@ model Episode {
                     <Play className="w-4 h-4 fill-black" />
                     Play in Browser
                   </button>
-                  {selectedContent.type === 'MOVIE' && selectedContent.movie?.telegramFileId && (
-                    <a
-                      href={`intent:${window.location.origin}${resolveMediaUrl(selectedContent.movie?.streamUrl || `/api/stream?fileId=${selectedContent.movie.telegramFileId}`)}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
-                      className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs transition shadow-md shadow-red-900/40 cursor-pointer"
-                      title="Stream directly in VLC, MX Player, or phone video player"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-white" />
-                      Play in VLC / MX Player
-                    </a>
-                  )}
+                  {selectedContent.type === 'MOVIE' && selectedContent.movie?.telegramFileId && (() => {
+                    const links = getExternalStreamLinks(selectedContent.movie?.streamUrl || `/api/stream?fileId=${selectedContent.movie.telegramFileId}`);
+                    return (
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={links.intentUrl}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs transition shadow-md shadow-red-900/40 cursor-pointer"
+                          title="Stream directly in VLC, MX Player, or phone video player"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-white" />
+                          Play in VLC / MX Player
+                        </a>
+                        <a
+                          href={links.directUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-lg border border-zinc-700 transition"
+                          title="Open direct streaming link in a new tab"
+                        >
+                          Direct Link
+                        </a>
+                      </div>
+                    );
+                  })()}
                   <button
                     onClick={async () => {
                       if (window.confirm(`Are you sure you want to delete "${selectedContent.title}"?`)) {
@@ -1226,123 +1257,136 @@ model Episode {
       )}
 
       {/* Netflix Fullscreen-Style Video Player */}
-      {isPlaying && activeEpisode && (
-        <div 
-          className="fixed inset-0 z-50 bg-black flex flex-col"
-          onClick={() => setShowControls(prev => !prev)}
-        >
-          {/* Top Bar Controls */}
-          <div className={`absolute top-0 inset-x-0 z-30 p-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent flex items-center justify-between transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={(e) => { e.stopPropagation(); setIsPlaying(false); }}
-                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <div>
-                <h3 className="text-lg font-bold text-white">
-                  {selectedContent?.title}{' '}
-                  {activeEpisode.seasonNo > 0
-                    ? `• S${activeEpisode.seasonNo}:E${activeEpisode.episodeNo}`
-                    : ''}
-                </h3>
-                <p className="text-xs text-zinc-400">{activeEpisode.title}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              {activeEpisode.streamUrl && (
-                <a
-                  href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs transition font-bold shadow-md shadow-red-950/80 cursor-pointer"
-                  title="Stream in VLC or mobile video player"
+      {isPlaying && activeEpisode && (() => {
+        const streamLinks = getExternalStreamLinks(activeEpisode.streamUrl);
+        return (
+          <div 
+            className="fixed inset-0 z-50 bg-black flex flex-col"
+            onClick={() => setShowControls(prev => !prev)}
+          >
+            {/* Top Bar Controls */}
+            <div className={`absolute top-0 inset-x-0 z-30 p-4 sm:p-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent flex items-center justify-between transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+              <div className="flex items-center gap-3 sm:gap-4">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setIsPlaying(false); }}
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition shrink-0"
                 >
-                  <Play className="w-3.5 h-3.5 fill-white text-white" />
-                  <span>Play in VLC / MX Player</span>
-                </a>
-              )}
-              <div className="hidden sm:block px-3 py-1 rounded bg-red-600/20 text-red-400 border border-red-800 text-[11px] font-mono">
-                Telegram Stream Proxy Active
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-lg font-bold text-white truncate">
+                    {selectedContent?.title}{' '}
+                    {activeEpisode.seasonNo > 0
+                      ? `• S${activeEpisode.seasonNo}:E${activeEpisode.episodeNo}`
+                      : ''}
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-zinc-400 truncate">{activeEpisode.title}</p>
+                </div>
               </div>
-            </div>
-          </div>
 
-          {/* Quick helper pill for HEVC / MKV black screen on mobile */}
-          {showControls && activeEpisode.streamUrl && (
-            <div className="absolute top-20 inset-x-0 z-30 flex justify-center pointer-events-none px-4">
-              <a
-                href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
-                onClick={(e) => e.stopPropagation()}
-                className="pointer-events-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-red-600/90 hover:bg-red-600 text-white font-semibold text-xs shadow-xl shadow-red-950/80 transition backdrop-blur border border-red-400/40 cursor-pointer"
-              >
-                <Play className="w-3.5 h-3.5 fill-white" />
-                <span>Black screen? Tap to play in VLC / MX Player</span>
-              </a>
-            </div>
-          )}
-
-          {/* Video element */}
-          <div className="flex-1 relative flex items-center justify-center bg-black">
-            {videoError && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-black/90 text-center space-y-4">
-                <AlertCircle className="w-12 h-12 text-amber-400 animate-pulse" />
-                <h4 className="text-lg font-bold text-white">MKV / HEVC Video Stream</h4>
-                <p className="text-xs sm:text-sm text-zinc-300 max-w-md leading-relaxed">
-                  This video is in <strong>.mkv (10-bit HEVC)</strong> format. Mobile browsers cannot decode raw MKVs, but you can stream it instantly with any video player on your phone!
-                </p>
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                 {activeEpisode.streamUrl && (
-                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md pt-2">
-                    {/* 1. Android Intent - Opens VLC / MX Player / Mi Video natively */}
+                  <div className="flex items-center gap-1.5">
                     <a
-                      href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
+                      href={streamLinks.intentUrl}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full sm:w-auto px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-900/50 flex items-center justify-center gap-2 transition cursor-pointer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs transition font-bold shadow-md shadow-red-950/80 cursor-pointer"
+                      title="Stream in VLC or mobile video player"
                     >
-                      <Play className="w-4 h-4 fill-white" />
-                      Play in App (VLC / MX Player)
+                      <Play className="w-3.5 h-3.5 fill-white text-white" />
+                      <span>Play in VLC / MX Player</span>
                     </a>
-
-                    {/* 2. Direct VLC scheme */}
                     <a
-                      href={`vlc://${window.location.origin}${activeEpisode.streamUrl}`}
+                      href={streamLinks.directUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full sm:w-auto px-4 py-3 rounded-xl bg-orange-600/90 hover:bg-orange-600 text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+                      className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-lg border border-zinc-700 transition"
+                      title="Open direct streaming link in a new tab"
                     >
-                      <Play className="w-3.5 h-3.5 fill-white" />
-                      Open in VLC
-                    </a>
-
-                    {/* 3. Copy Stream URL */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const fullUrl = `${window.location.origin}${activeEpisode.streamUrl}`;
-                        navigator.clipboard.writeText(fullUrl);
-                        setCopiedStream(true);
-                        setTimeout(() => setCopiedStream(false), 3000);
-                      }}
-                      className="w-full sm:w-auto px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-700 transition cursor-pointer"
-                    >
-                      {copiedStream ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                      {copiedStream ? 'Copied Link!' : 'Copy Link'}
-                    </button>
-
-                    {/* 4. Download file */}
-                    <a
-                      href={activeEpisode.streamUrl}
-                      download
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full sm:w-auto px-4 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-800 transition cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" />
-                      Download
+                      Direct Link
                     </a>
                   </div>
                 )}
+                <div className="hidden lg:block px-3 py-1 rounded bg-red-600/20 text-red-400 border border-red-800 text-[11px] font-mono">
+                  Telegram Stream Proxy Active
+                </div>
+              </div>
+            </div>
+
+            {/* Quick helper pill for HEVC / MKV black screen on mobile */}
+            {showControls && activeEpisode.streamUrl && (
+              <div className="absolute top-18 sm:top-20 inset-x-0 z-30 flex justify-center pointer-events-none px-4">
+                <a
+                  href={streamLinks.intentUrl}
+                  onClick={(e) => e.stopPropagation()}
+                  className="pointer-events-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-red-600/90 hover:bg-red-600 text-white font-semibold text-xs shadow-xl shadow-red-950/80 transition backdrop-blur border border-red-400/40 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-white" />
+                  <span>Black screen? Tap to play in VLC / MX Player</span>
+                </a>
               </div>
             )}
+
+            {/* Video element */}
+            <div className="flex-1 relative flex items-center justify-center bg-black">
+              {videoError && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-black/90 text-center space-y-4">
+                  <AlertCircle className="w-12 h-12 text-amber-400 animate-pulse" />
+                  <h4 className="text-lg font-bold text-white">MKV / HEVC Video Stream</h4>
+                  <p className="text-xs sm:text-sm text-zinc-300 max-w-md leading-relaxed">
+                    This video is in <strong>.mkv (10-bit HEVC)</strong> format. Mobile browsers cannot decode raw MKVs, but you can stream it instantly with any video player on your phone!
+                  </p>
+                  {activeEpisode.streamUrl && (
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md pt-2">
+                      {/* 1. Android Intent - Opens VLC / MX Player / Mi Video natively */}
+                      <a
+                        href={streamLinks.intentUrl}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full sm:w-auto px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-lg shadow-red-900/50 flex items-center justify-center gap-2 transition cursor-pointer"
+                      >
+                        <Play className="w-4 h-4 fill-white" />
+                        Play in App (VLC / MX Player)
+                      </a>
+
+                      {/* 2. Direct VLC scheme */}
+                      <a
+                        href={streamLinks.vlcUrl}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full sm:w-auto px-4 py-3 rounded-xl bg-orange-600/90 hover:bg-orange-600 text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        Open in VLC
+                      </a>
+
+                      {/* 3. Direct Link (new tab) */}
+                      <a
+                        href={streamLinks.directUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full sm:w-auto px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+                      >
+                        Direct Stream Tab
+                      </a>
+
+                      {/* 4. Copy Stream URL */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(streamLinks.directUrl);
+                          setCopiedStream(true);
+                          setTimeout(() => setCopiedStream(false), 3000);
+                        }}
+                        className="w-full sm:w-auto px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-700 transition cursor-pointer"
+                      >
+                        {copiedStream ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        {copiedStream ? 'Copied Link!' : 'Copy Link'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
             <video
               ref={videoRef}
@@ -1473,7 +1517,8 @@ model Episode {
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
     </div>
   );
 }
