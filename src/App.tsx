@@ -1112,8 +1112,18 @@ model Episode {
                     className="flex items-center gap-2 px-5 py-2 bg-white hover:bg-zinc-200 text-black font-bold rounded-lg text-xs transition shadow-md cursor-pointer"
                   >
                     <Play className="w-4 h-4 fill-black" />
-                    Play Now
+                    Play in Browser
                   </button>
+                  {selectedContent.type === 'MOVIE' && selectedContent.movie?.telegramFileId && (
+                    <a
+                      href={`intent:${window.location.origin}${resolveMediaUrl(selectedContent.movie?.streamUrl || `/api/stream?fileId=${selectedContent.movie.telegramFileId}`)}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs transition shadow-md shadow-red-900/40 cursor-pointer"
+                      title="Stream directly in VLC, MX Player, or phone video player"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-white" />
+                      Play in VLC / MX Player
+                    </a>
+                  )}
                   <button
                     onClick={async () => {
                       if (window.confirm(`Are you sure you want to delete "${selectedContent.title}"?`)) {
@@ -1126,7 +1136,7 @@ model Episode {
                         }
                       }
                     }}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-red-600/80 hover:bg-red-600 text-white font-semibold rounded-lg text-xs transition border border-red-500/30 cursor-pointer"
+                    className="flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-red-600 text-zinc-300 hover:text-white font-semibold rounded-lg text-xs transition border border-zinc-700 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete
@@ -1246,18 +1256,32 @@ model Episode {
                 <a
                   href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-zinc-700 text-xs transition font-semibold"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs transition font-bold shadow-md shadow-red-950/80 cursor-pointer"
                   title="Stream in VLC or mobile video player"
                 >
-                  <Play className="w-3.5 h-3.5 fill-red-500 text-red-500" />
-                  <span>Play in External App</span>
+                  <Play className="w-3.5 h-3.5 fill-white text-white" />
+                  <span>Play in VLC / MX Player</span>
                 </a>
               )}
-              <div className="px-3 py-1 rounded bg-red-600/20 text-red-400 border border-red-800 text-[11px] font-mono">
+              <div className="hidden sm:block px-3 py-1 rounded bg-red-600/20 text-red-400 border border-red-800 text-[11px] font-mono">
                 Telegram Stream Proxy Active
               </div>
             </div>
           </div>
+
+          {/* Quick helper pill for HEVC / MKV black screen on mobile */}
+          {showControls && activeEpisode.streamUrl && (
+            <div className="absolute top-20 inset-x-0 z-30 flex justify-center pointer-events-none px-4">
+              <a
+                href={`intent:${window.location.origin}${activeEpisode.streamUrl}#Intent;type=video/*;action=android.intent.action.VIEW;scheme=https;end`}
+                onClick={(e) => e.stopPropagation()}
+                className="pointer-events-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-red-600/90 hover:bg-red-600 text-white font-semibold text-xs shadow-xl shadow-red-950/80 transition backdrop-blur border border-red-400/40 cursor-pointer"
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Black screen? Tap to play in VLC / MX Player</span>
+              </a>
+            </div>
+          )}
 
           {/* Video element */}
           <div className="flex-1 relative flex items-center justify-center bg-black">
